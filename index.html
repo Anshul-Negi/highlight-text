@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Headline Highlighter Animator</title>
+<style>
+  :root { --bg:#fafafa; --panel:#fff; --text:#111827; --muted:#6b7280; --border:#e5e7eb; --accent:#111827 }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Inter,Roboto,Arial;background:var(--bg);color:var(--text)}
+  header{padding:14px 16px;border-bottom:1px solid var(--border);display:flex;gap:10px;align-items:center;justify-content:space-between;background:#fff}
+  header .title{font-size:16px;font-weight:700}
+  .hint{color:var(--muted);font-size:12px}
+  .app{display:grid;grid-template-columns:320px 1fr;gap:14px;padding:14px;min-height:calc(100vh - 54px)}
+  .panel{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:12px}
+  .panel h2{margin:0 0 8px 0;font-size:12px;color:var(--muted);font-weight:700;letter-spacing:.2px}
+  .control{margin-bottom:10px}
+  .control label{display:block;font-size:12px;color:var(--muted);margin-bottom:6px}
+  .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  select,input[type="color"],input[type="range"],input[type="file"]{width:100%;background:#fff;color:var(--text);border:1px solid var(--border);border-radius:10px;padding:8px}
+  input[type="range"]{padding:0}
+  button{background:var(--accent);color:#fff;border:1px solid var(--accent);padding:10px 12px;border-radius:10px;cursor:pointer;font-weight:700}
+  button.ghost{background:#fff;color:var(--accent);border:1px solid var(--border)}
+  button:disabled{opacity:.6;cursor:not-allowed}
+  .actions{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .stage{background:#fff;border:1px solid var(--border);border-radius:12px;padding:10px;position:relative}
+  #canvasWrap{position:relative;width:100%;height:70vh;border-radius:10px;overflow:hidden;background:#f3f4f6;border:1px dashed var(--border)}
+  canvas{width:100%;height:100%;display:block;background:#f9fafb}
+  .status{color:var(--muted);font-size:12px;padding-top:8px}
+  .snack{position:fixed;left:16px;bottom:16px;background:#fff;border:1px solid var(--border);color:var(--text);padding:10px 12px;border-radius:10px;display:flex;gap:10px;align-items:center;z-index:50;box-shadow:0 8px 24px rgba(0,0,0,.08)}
+  .snack.hidden{display:none}
+  .snack button{padding:6px 10px;border-radius:8px}
+  .hud{position:absolute;transform:translate(-50%,-100%);background:#fff;border:1px solid var(--border);color:var(--text);padding:6px 8px;border-radius:10px;display:flex;gap:8px;align-items:center;z-index:20}
+  .hud.hidden{display:none}
+  .hud button{font-size:12px;padding:8px 10px;border-radius:10px}
+  .handle{position:absolute;width:10px;height:10px;background:#fff;border:1px solid #111827;border-radius:2px;box-shadow:0 1px 2px rgba(0,0,0,.08);pointer-events:none}
+</style>
+</head>
+<body>
+<header>
+  <div class="title">Headline Highlighter Animator</div>
+  <div class="hint">Drag to draw • click to select & move • drag corners/sides to resize • double‑click to delete</div>
+</header>
+
+<main class="app">
+  <section class="panel">
+    <h2>Inputs</h2>
+
+    <div class="control">
+      <label>Image file</label>
+      <input id="file" type="file" accept="image/*" />
+    </div>
+
+    <div class="control">
+      <label>Highlight shape</label>
+      <select id="shape">
+        <option value="rect">Rectangle</option>
+        <option value="brush">Hand‑Drawn Brush</option>
+      </select>
+    </div>
+
+    <div class="control">
+      <label>Color</label>
+      <input id="color" type="color" value="#FFEB3B" />
+    </div>
+
+    <div class="control">
+      <label>Opacity</label>
+      <input id="opacity" type="range" min="0.1" max="1" step="0.05" value="0.9" />
+    </div>
+
+    <div class="control">
+      <label>Corner radius (Rectangle)</label>
+      <input id="radius" type="range" min="0" max="60" step="2" value="18" />
+    </div>
+
+    <div class="control">
+      <label>Duration (<span id="durationVal">0.6</span>s)</label>
+      <input id="duration" type="range" min="0.1" max="1.5" step="0.1" value="0.6" />
+    </div>
+
+    <div class="row" style="margin-top:8px">
+      <button id="btnPreview" title="Play preview">Preview</button>
+      <button id="btnUndo" class="ghost" title="Undo last action">Undo</button>
+      <button id="btnClear" class="ghost" title="Remove all highlights">Clear All</button>
+    </div>
+
+    <div class="actions" style="margin-top:8px">
+      <button id="btnExportMP4" title="Export as MP4">Export MP4</button>
+      <button id="btnExportPNG" class="ghost" title="Export as PNG">Export PNG</button>
+    </div>
+
+    <div class="status" id="status">Load an image, then draw highlight areas.</div>
+  </section>
+
+  <section class="stage">
+    <div id="canvasWrap">
+      <canvas id="c"></canvas>
+
+      <div id="hud" class="hud hidden">
+        <button id="btnDelete">Delete</button>
+      </div>
+
+      <div id="h-nw" class="handle" style="display:none"></div>
+      <div id="h-n"  class="handle" style="display:none"></div>
+      <div id="h-ne" class="handle" style="display:none"></div>
+      <div id="h-e"  class="handle" style="display:none"></div>
+      <div id="h-se" class="handle" style="display:none"></div>
+      <div id="h-s"  class="handle" style="display:none"></div>
+      <div id="h-sw" class="handle" style="display:none"></div>
+      <div id="h-w"  class="handle" style="display:none"></div>
+    </div>
+    <div class="hint" style="padding-top:8px">Tip: Hold Shift while drawing to make a thin horizontal band.</div>
+  </section>
+</main>
+
+<div id="snack" class="snack hidden">
+  <span id="snackMsg">Box added</span>
+  <button id="snackUndo">Undo</button>
+</div>
+
+<script type="module">
+/* Import FFmpeg as an ES module so Vercel serves correct MIME */
+import { createFFmpeg } from "https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.6/+esm";
+
+/* Explicit core path so the wasm loads from CDN on Vercel */
+const ffmpegCorePath = "https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.6/dist/ffmpeg-core.js";
+
+/* UI refs */
+const fileEl = document.getElementById('file');
+const shapeEl = document.getElementById('shape');
+const colorEl = document.getElementById('color');
+const opacityEl = document.getElementById('opacity');
+const radiusEl = document.getElementById('radius');
+const durationEl = document.getElementById('duration');
+const durationVal = document.getElementById('durationVal');
+const statusEl = document.getElementById('status');
+const btnPreview = document.getElementById('btnPreview');
+const btnUndo = document.getElementById('btnUndo');
+const btnClear = document.getElementById('btnClear');
+const btnExportPNG = document.getElementById('btnExportPNG');
+const btnExportMP4 = document.getElementById('btnExportMP4');
+const snack = document.getElementById('snack');
+const snackMsg = document.getElementById('snackMsg');
+const snackUndo = document.getElementById('snackUndo');
+const hud = document.getElementById('hud');
+const btnDelete = document.getElementById('btnDelete');
+const handles = {
+  nw: document.getElementById('h-nw'), n: document.getElementById('h-n'), ne: document.getElementById('h-ne'),
+  e: document.getElementById('h-e'), se: document.getElementById('h-se'), s: document.getElementById('h-s'),
+  sw: document.getElementById('h-sw'), w: document.getElementById('h-w')
+};
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d', { alpha: false });
+
+/* Image + state */
+let imgBitmap = null;
+let scale = 1, offsetX = 0, offsetY = 0;
+
+const state = {
+  boxes: [], activeIndex: -1, draggingNew: false, moving: false,
+  resizing: false, handle: null, anchor: null, boxStart: null,
+  previewing: false, lastTime: 0, progress: 0, fps: 30, history: []
+};
+
+function setStatus(t){ statusEl.textContent = t }
+function clamp(v,a,b){ return Math.max(a, Math.min(b,v)) }
+function snapshot(){ const copy = state.boxes.map(b => ({...b})); state.history.push(copy); if(state.history.length>50) state.history.shift() }
+function undo(){ if(!state.history.length) return; state.boxes = state.history.pop(); state.activeIndex=-1; draw(); setStatus('Undone'); hideHud(); hideHandles() }
+function showSnack(msg, onUndo){
+  snackMsg.textContent = msg; snack.classList.remove('hidden');
+  const off = ()=> snack.classList.add('hidden');
+  const undoClick = ()=>{ off(); onUndo && onUndo(); snackUndo.removeEventListener('click', undoClick) };
+  snackUndo.addEventListener('click', undoClick); setTimeout(off, 3500);
+}
+
+function roundedRectPath(ctx, x, y, w, h, r){
+  const rr = Math.min(r, Math.abs(w)/2, Math.abs(h)/2);
+  ctx.beginPath();
+  ctx.moveTo(x + rr, y);
+  ctx.lineTo(x + w - rr, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + rr);
+  ctx.lineTo(x + w, y + h - rr);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - rr, y + h);
+  ctx.lineTo(x + rr, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - rr);
+  ctx.lineTo(x, y + rr);
+  ctx.quadraticCurveTo(x, y, x + rr, y);
+  ctx.closePath();
+}
+function brushPath(ctx, x, y, w, h, t, seed){
+  const steps = 36, aw = Math.max(1, w*t), mid = y + h/2, baseAmp = Math.min(12, h*0.3), taperFn = u => Math.sin(Math.PI*u);
+  ctx.beginPath();
+  for(let i=0;i<=steps;i++){
+    const u=i/steps, xx=x+aw*u, taper=0.75+0.35*taperFn(u);
+    const noise=k=>(Math.sin((i*97.13+seed*k))*0.5+0.5);
+    const jt=(noise(1)-0.5)*2*baseAmp*(0.7+0.6*noise(3));
+    const top=mid-(h*taper)/2+jt*0.4;
+    if(i===0) ctx.moveTo(xx,top); else ctx.lineTo(xx,top);
+  }
+  for(let i=steps;i>=0;i--){
+    const u=i/steps, xx=x+aw*u, taper=0.75+0.35*taperFn(u);
+    const noise=k=>(Math.sin((i*131.7+seed*k))*0.5+0.5);
+    const jb=(noise(2)-0.5)*2*baseAmp*(0.7+0.6*noise(4));
+    const bot=mid+(h*taper)/2+jb*0.4;
+    ctx.lineTo(xx,bot);
+  }
+  ctx.closePath();
+}
+
+function fitImageToCanvas(){
+  if(!imgBitmap) return;
+  const wrap = document.getElementById('canvasWrap');
+  const W = wrap.clientWidth, H = wrap.clientHeight;
+  canvas.width = W; canvas.height = H;
+  const iw = imgBitmap.width || imgBitmap.naturalWidth;
+  const ih = imgBitmap.height || imgBitmap.naturalHeight;
+  const s = Math.min(W/iw, H/ih);
+  scale = s;
+  const dw = iw*s, dh = ih*s;
+  offsetX = (W - dw)/2; offsetY = (H - dh)/2;
+  draw();
+}
+new ResizeObserver(fitImageToCanvas).observe(document.getElementById('canvasWrap'));
+
+function draw(progress){
+  ctx.fillStyle = '#ffffff'; ctx.fillRect(0,0,canvas.width,canvas.height);
+  if(!imgBitmap) return;
+
+  ctx.drawImage(imgBitmap, offsetX, offsetY, (imgBitmap.width||imgBitmap.naturalWidth)*scale, (imgBitmap.height||imgBitmap.naturalHeight)*scale);
+
+  const r = parseFloat(radiusEl.value), col = colorEl.value, op = parseFloat(opacityEl.value);
+  const sweep = (progress !== undefined) ? clamp(progress,0,1) : 1;
+  const useBrush = shapeEl.value === 'brush';
+
+  state.boxes.forEach((b,i)=>{
+    ctx.save();
+    roundedRectPath(ctx, b.x, b.y, b.w, b.h, Math.min(r, b.h/2));
+    ctx.clip();
+    ctx.globalAlpha = op;
+    ctx.globalCompositeOperation = 'multiply';
+    ctx.fillStyle = col;
+    if(useBrush) brushPath(ctx, b.x, b.y, b.w, b.h, sweep, b.seed || 1);
+    else { roundedRectPath(ctx, b.x, b.y, b.w * sweep, b.h, r) }
+    ctx.fill();
+    ctx.restore();
+
+    ctx.save();
+    ctx.strokeStyle = (i === state.activeIndex) ? 'rgba(17,24,39,0.95)' : 'rgba(17,24,39,0.5)';
+    ctx.setLineDash([6,6]); ctx.lineWidth = 1;
+    roundedRectPath(ctx, b.x, b.y, b.w, b.h, Math.min(r, b.h/2)); ctx.stroke();
+    ctx.restore();
+  });
+
+  positionHud();
+  positionHandles();
+}
+
+function canvasPos(e){ const rect = canvas.getBoundingClientRect(); return { x:e.clientX-rect.left, y:e.clientY-rect.top } }
+function indexAtPoint(p){
+  for(let i=state.boxes.length-1;i>=0;i--){
+    const b=state.boxes[i];
+    if(p.x>=b.x && p.x<=b.x+b.w && p.y>=b.y && p.y<=b.y+b.h) return i;
+  } return -1;
+}
+
+function showHud(){ if(state.activeIndex===-1) hud.classList.add('hidden'); else hud.classList.remove('hidden') }
+function hideHud(){ hud.classList.add('hidden') }
+function positionHud(){
+  if(state.activeIndex===-1 || !state.boxes[state.activeIndex]){ hideHud(); return }
+  const b = state.boxes[state.activeIndex], hx=b.x+b.w/2, hy=b.y-8;
+  hud.style.left = hx+'px'; hud.style.top = hy+'px'; showHud();
+}
+function hideHandles(){ Object.values(handles).forEach(h => h.style.display='none') }
+function positionHandles(){
+  if(state.activeIndex===-1 || !state.boxes[state.activeIndex]){ hideHandles(); return }
+  const b = state.boxes[state.activeIndex], hw=10, hh=10;
+  const pos = {
+    nw:{x:b.x-hw/2,y:b.y-hh/2}, n:{x:b.x+b.w/2-hw/2,y:b.y-hh/2}, ne:{x:b.x+b.w-hw/2,y:b.y-hh/2},
+    e:{x:b.x+b.w-hw/2,y:b.y+b.h/2-hh/2}, se:{x:b.x+b.w-hw/2,y:b.y+b.h-hh/2},
+    s:{x:b.x+b.w/2-hw/2,y:b.y+b.h-hh/2}, sw:{x:b.x-hw/2,y:b.y+b.h-hh/2}, w:{x:b.x-hw/2,y:b.y+b.h/2-hh/2}
+  };
+  Object.entries(pos).forEach(([k,pt])=>{
+    const el = handles[k]; el.style.display='block'; el.style.left=`${pt.x}px`; el.style.top=`${pt.y}px`;
+  });
+}
+function handleHit(p){
+  const keys=['nw','n','ne','e','se','s','sw','w'];
+  for(const k of keys){
+    const el = handles[k]; if(el.style.display==='none') continue;
+    const rect = el.getBoundingClientRect(), cRect = canvas.getBoundingClientRect();
+    const hx = rect.left - cRect.left, hy = rect.top - cRect.top;
+    if(p.x>=hx && p.x<=hx+rect.width && p.y>=hy && p.y<=hy+rect.height) return k;
+  } return null;
+}
+
+/* Mouse controls */
+canvas.addEventListener('mousedown', (e)=>{
+  if(!imgBitmap) return;
+  const p = canvasPos(e);
+  const hitHandle = handleHit(p);
+  if(state.activeIndex!==-1 && hitHandle){
+    state.resizing=true; state.handle=hitHandle; state.boxStart={...state.boxes[state.activeIndex]}; state.anchor=p; snapshot(); setStatus('Resizing'); return;
+  }
+  const hit = indexAtPoint(p);
+  if(hit!==-1){
+    state.activeIndex=hit; state.moving=true; state.draggingNew=false;
+    const b = state.boxes[hit]; state.anchor={dx:p.x-b.x, dy:p.y-b.y}; setStatus('Moving selection'); draw();
+  } else {
+    snapshot(); state.moving=false; state.draggingNew=true; state.activeIndex=state.boxes.length;
+    state.anchor={x:p.x,y:p.y};
+    state.boxes.push({x:p.x,y:p.y,w:1,h:1,seed:Math.floor(Math.random()*10000)});
+    setStatus('Drawing selection'); showSnack('Box added', ()=> undo());
+  }
+});
+
+window.addEventListener('mousemove', (e)=>{
+  if(!imgBitmap) return; const p = canvasPos(e);
+  if(state.resizing && state.activeIndex>-1){
+    const bs=state.boxStart; let x=bs.x,y=bs.y,w=bs.w,h=bs.h;
+    const dx=p.x-state.anchor.x, dy=p.y-state.anchor.y, min=10;
+    switch(state.handle){
+      case 'nw': x=bs.x+dx; y=bs.y+dy; w=bs.w-dx; h=bs.h-dy; break;
+      case 'n':  y=bs.y+dy; h=bs.h-dy; break;
+      case 'ne': y=bs.y+dy; w=bs.w+dx; h=bs.h-dy; break;
+      case 'e':  w=bs.w+dx; break;
+      case 'se': w=bs.w+dx; h=bs.h+dy; break;
+      case 's':  h=bs.h+dy; break;
+      case 'sw': x=bs.x+dx; w=bs.w-dx; h=bs.h+dy; break;
+      case 'w':  x=bs.x+dx; w=bs.w-dx; break;
+    }
+    if(w<min){ x+=(w-min); w=min } if(h<min){ y+=(h-min); h=min }
+    x = clamp(x,0,canvas.width-w); y = clamp(y,0,canvas.height-h);
+    const b=state.boxes[state.activeIndex]; b.x=x;b.y=y;b.w=w;b.h=h; draw(); return;
+  }
+  if(state.draggingNew){
+    const x0=state.anchor.x, y0=state.anchor.y, w=p.x-x0, h=p.y-y0, idx=state.activeIndex, hCon=clamp(Math.abs(h),20,300);
+    if(e.shiftKey) state.boxes[idx]={x:Math.min(x0,p.x), y:y0, w:Math.abs(w), h:hCon, seed:state.boxes[idx].seed};
+    else state.boxes[idx]={x:Math.min(x0,p.x), y:Math.min(y0,p.y), w:Math.abs(w), h:Math.abs(h), seed:state.boxes[idx].seed};
+    draw();
+  } else if(state.moving && state.activeIndex>-1){
+    const b=state.boxes[state.activeIndex]; b.x=p.x-state.anchor.dx; b.y=p.y-state.anchor.dy;
+    b.x=clamp(b.x,0,canvas.width-b.w); b.y=clamp(b.y,0,canvas.height-b.h); draw();
+  }
+});
+
+window.addEventListener('mouseup', ()=>{
+  if(state.draggingNew || state.moving || state.resizing) setStatus('Box ready. You can add more or Preview.');
+  state.draggingNew=false; state.moving=false; state.resizing=false; state.handle=null;
+});
+
+canvas.addEventListener('click', (e)=>{ const p=canvasPos(e); const hit=indexAtPoint(p); state.activeIndex=hit; draw() });
+canvas.addEventListener('dblclick', (e)=>{
+  const p=canvasPos(e); const hit=indexAtPoint(p);
+  if(hit!==-1){ snapshot(); state.boxes.splice(hit,1); state.activeIndex=-1; draw(); setStatus('Deleted selection') }
+});
+
+window.addEventListener('keydown', (e)=>{
+  const meta = e.ctrlKey || e.metaKey;
+  if(meta && e.key.toLowerCase()==='z'){ e.preventDefault(); undo() }
+  if(e.key==='Delete' && state.activeIndex>-1){ snapshot(); state.boxes.splice(state.activeIndex,1); state.activeIndex=-1; draw(); setStatus('Deleted selection') }
+});
+
+btnDelete.addEventListener('click', ()=>{
+  if(state.activeIndex===-1) return; snapshot(); state.boxes.splice(state.activeIndex,1); state.activeIndex=-1; draw(); setStatus('Deleted selection')
+});
+
+/* Image load */
+fileEl.addEventListener('change', async (e)=>{
+  const f = e.target.files?.[0];
+  if(!f){ setStatus('No file selected'); return }
+  const url = URL.createObjectURL(f);
+  const img = new Image();
+  img.onload = async ()=>{
+    try{
+      if('createImageBitmap' in window) imgBitmap = await createImageBitmap(img);
+      else {
+        const off = document.createElement('canvas'); off.width = img.naturalWidth; off.height = img.naturalHeight;
+        off.getContext('2d').drawImage(img,0,0);
+        imgBitmap = await createImageBitmap(off);
+      }
+    }catch{ imgBitmap = img }
+    URL.revokeObjectURL(url);
+    state.boxes=[]; state.activeIndex=-1; state.history=[];
+    fitImageToCanvas();
+    setStatus('Image loaded. Draw one or more highlight areas.');
+  };
+  img.onerror = ()=> setStatus('Could not load that image file');
+  img.src = url;
+});
+
+/* Controls */
+durationEl.addEventListener('input', ()=>{ durationVal.textContent = durationEl.value });
+[shapeEl,colorEl,opacityEl,radiusEl].forEach(el=> el.addEventListener('input', ()=> draw()));
+
+/* Preview */
+let rafId = null;
+function startPreview(){
+  if(!imgBitmap || state.boxes.length===0){ setStatus('Load image and draw at least one box.'); return }
+  state.previewing=true; state.progress=0; state.lastTime=performance.now();
+  const dur = parseFloat(durationEl.value)*1000;
+  function tick(now){
+    const dt=now-state.lastTime; state.lastTime=now; state.progress+=dt/dur;
+    if(state.progress>1) state.progress=1;
+    draw(state.progress);
+    if(state.progress<1 && state.previewing){ rafId=requestAnimationFrame(tick) } else { state.previewing=false; setStatus('Preview finished') }
+  }
+  setStatus('Previewing…'); rafId=requestAnimationFrame(tick);
+}
+btnPreview.addEventListener('click', startPreview);
+
+/* PNG export (source size) */
+function exportPNG(){
+  if(!imgBitmap || state.boxes.length===0){ setStatus('Load image and draw at least one box.'); return }
+  const expCanvas=document.createElement('canvas'), expCtx=expCanvas.getContext('2d',{alpha:false});
+  const targetW = imgBitmap.width || imgBitmap.naturalWidth, targetH = imgBitmap.height || imgBitmap.naturalHeight;
+  expCanvas.width=targetW; expCanvas.height=targetH;
+  expCtx.fillStyle='#ffffff'; expCtx.fillRect(0,0,targetW,targetH);
+  expCtx.drawImage(imgBitmap,0,0,targetW,targetH);
+
+  const col=colorEl.value, op=parseFloat(opacityEl.value), r=parseFloat(radiusEl.value), useBrush=shapeEl.value==='brush';
+  state.boxes.forEach(b=>{
+    const bx=((b.x-offsetX)/((imgBitmap.width||imgBitmap.naturalWidth)*scale))*targetW;
+    const by=((b.y-offsetY)/((imgBitmap.height||imgBitmap.naturalHeight)*scale))*targetH;
+    const bw=(b.w/((imgBitmap.width||imgBitmap.naturalWidth)*scale))*targetW;
+    const bh=(b.h/((imgBitmap.height||imgBitmap.naturalHeight)*scale))*targetH;
+    expCtx.save(); roundedRectPath(expCtx,bx,by,bw,bh,Math.min(r,bh/2)); expCtx.clip();
+    expCtx.globalAlpha=op; expCtx.globalCompositeOperation='multiply'; expCtx.fillStyle=col;
+    if(useBrush) brushPath(expCtx,bx,by,bw,bh,1,b.seed||1); else { roundedRectPath(expCtx,bx,by,bw,bh,r) }
+    expCtx.fill(); expCtx.restore();
+  });
+  const url = expCanvas.toDataURL('image/png');
+  const a=document.createElement('a'); a.href=url; a.download='headline-highlight.png'; document.body.appendChild(a); a.click(); a.remove();
+  setStatus('PNG exported');
+}
+btnExportPNG.addEventListener('click', exportPNG);
+
+/* MP4 export via ffmpeg.wasm (source size) */
+async function exportMP4(){
+  if(!imgBitmap || state.boxes.length===0){ setStatus('Load image and draw at least one box.'); return }
+  btnExportMP4.disabled=true; btnPreview.disabled=true; setStatus('Preparing MP4…');
+
+  const ffmpeg = createFFmpeg({ log:false, corePath: ffmpegCorePath });
+  if(!ffmpeg.isLoaded()) await ffmpeg.load();
+
+  const targetW = imgBitmap.width || imgBitmap.naturalWidth, targetH = imgBitmap.height || imgBitmap.naturalHeight;
+  const expCanvas=document.createElement('canvas'), expCtx=expCanvas.getContext('2d',{alpha:false});
+  expCanvas.width=targetW; expCanvas.height=targetH;
+
+  const mapped = state.boxes.map(b=>({
+    x: ((b.x-offsetX)/((imgBitmap.width||imgBitmap.naturalWidth)*scale))*targetW,
+    y: ((b.y-offsetY)/((imgBitmap.height||imgBitmap.naturalHeight)*scale))*targetH,
+    w: (b.w/((imgBitmap.width||imgBitmap.naturalWidth)*scale))*targetW,
+    h: (b.h/((imgBitmap.height||imgBitmap.naturalHeight)*scale))*targetH,
+    seed: b.seed
+  }));
+
+  const fps = state.fps;
+  const totalFrames = Math.max(1, Math.round(fps * parseFloat(durationEl.value)));
+
+  for(let i=0;i<=totalFrames;i++){
+    const t = i/totalFrames;
+    expCtx.fillStyle='#ffffff'; expCtx.fillRect(0,0,targetW,targetH);
+    expCtx.drawImage(imgBitmap,0,0,targetW,targetH);
+    const col=colorEl.value, op=parseFloat(opacityEl.value), r=parseFloat(radiusEl.value), useBrush=shapeEl.value==='brush';
+    mapped.forEach(b=>{
+      expCtx.save(); roundedRectPath(expCtx,b.x,b.y,b.w,b.h,Math.min(r,b.h/2)); expCtx.clip();
+      expCtx.globalAlpha=op; expCtx.globalCompositeOperation='multiply'; expCtx.fillStyle=col;
+      if(useBrush) brushPath(expCtx,b.x,b.y,b.w,b.h,t,b.seed||1); else { roundedRectPath(expCtx,b.x,b.y,b.w*t,b.h,r) }
+      expCtx.fill(); expCtx.restore();
+    });
+    const blob = await new Promise(res=> expCanvas.toBlob(res,'image/png'));
+    const buf = new Uint8Array(await blob.arrayBuffer());
+    ffmpeg.FS('writeFile', `frame${String(i).padStart(5,'0')}.png`, buf);
+  }
+
+  await ffmpeg.run('-framerate', String(fps), '-i', 'frame%05d.png', '-c:v', 'mpeg4', '-q:v', '3', '-pix_fmt', 'yuv420p', 'out.mp4');
+
+  const data = ffmpeg.FS('readFile','out.mp4');
+  const url = URL.createObjectURL(new Blob([data.buffer], {type:'video/mp4'}));
+  const a=document.createElement('a'); a.href=url; a.download='headline-highlight.mp4';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url), 2000);
+
+  setStatus('MP4 exported'); btnExportMP4.disabled=false; btnPreview.disabled=false;
+}
+btnExportMP4.addEventListener('click', exportMP4);
+
+fitImageToCanvas();
+</script>
+</body>
+</html>
+
+
